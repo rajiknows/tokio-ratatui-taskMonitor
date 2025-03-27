@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package taskmonitor.v1;
+
+enum TaskStatus {
+    WAITING = 0;
+    RUNNING = 1;
+    COMPLETED = 2;
+    FAILED = 3;
+}
+
+enum LogLevel {
+    INFO = 0;
+    DEBUG = 1;
+    WARNING = 2;
+    ERROR = 3;
+}
+
+message WatchRequest {
+    repeated string task_ids = 1;
+}
+
+message TaskInitEvent {
+    string task_id = 1;
+    string name = 2;
+    double created_at = 3;
+    int32 priority = 4;
+}
+
+message TaskUpdateEvent {
+    string task_id = 1;
+    TaskStatus status = 2;
+    double progress = 3;
+    double timestamp = 4;
+}
+
+message TaskLogEvent {
+    string task_id = 1;
+    LogLevel log_level = 2;
+    string message = 3;
+    double timestamp = 4;
+}
+
+message TaskMetricsEvent {
+    string task_id = 1;
+    double cpu_usage = 2;
+    double memory_usage = 3;
+    double disk_io = 4;
+    double timestamp = 5;
+}
+
+message TaskTerminateEvent {
+    string task_id = 1;
+    int32 exit_code = 2;
+    string reason = 3;
+    double timestamp = 4;
+}
+
+message TaskEvent {
+    oneof event {
+        TaskInitEvent init = 1;
+        TaskUpdateEvent update = 2;
+        TaskLogEvent log = 3;
+        TaskMetricsEvent metrics = 4;
+        TaskTerminateEvent terminate = 5;
+    }
+}
+
+service TaskMonitorService {
+    rpc WatchTaskEvents(WatchRequest) returns (stream TaskEvent);
+}

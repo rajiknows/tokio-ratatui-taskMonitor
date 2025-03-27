@@ -1,13 +1,36 @@
 [package]
-name = "tokio-rat"
+name = "task-monitor"
 version = "0.1.0"
 edition = "2021"
 
+build = "build.rs"
+
 [dependencies]
-chrono = "0.4.40"
-crossterm = "0.28.1"
-ratatui = "0.29.0"
-serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.140"
-tungstenite = "0.26.2"
-url = "2.5.4"
+# Async runtime
+tokio = { version = "1.35.0", features = ["full"] }
+tokio-stream = { version = "0.1.14", features = ["net"] }
+futures = "0.3"
+
+# gRPC and RPC
+tonic = "0.10.2"
+prost = "0.12.3"
+
+# Additional utilities
+uuid = { version = "1.6.1", features = ["v4"] }
+rand = "0.8.5"
+chrono = "0.4.31"
+
+# TUI
+ratatui = "0.25.0"
+crossterm = "0.27.0"
+
+[build-dependencies]
+tonic-build = "0.10.2"
+
+[[bin]]
+name = "server"
+path = "src/bin/server.rs"
+
+[[bin]]
+name = "client"
+path = "src/bin/client.rs"
