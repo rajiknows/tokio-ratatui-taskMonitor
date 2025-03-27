@@ -79,3 +79,6 @@ Client Details
     Supports up to 50 log messages and 10 logs per task, with older entries removed.
 
 Example Output
+
+![image](https://github.com/user-attachments/assets/00557e8e-97f9-4228-8328-30e079df0dbf)
+
