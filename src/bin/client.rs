@@ -15,12 +15,15 @@ use ratatui::{
 use tokio::{sync::mpsc, task};
 use tonic::Request;
 
-// Import generated gRPC code
+// Import generated gRPC code from the task_monitor proto definitions
 use task_monitor::taskmonitor::{
     task_event::Event, task_monitor_service_client::TaskMonitorServiceClient, LogLevel, TaskStatus,
 };
 
-// Enhanced Task struct with more detailed tracking
+/// Represents a task with detailed tracking information.
+///
+/// This struct holds all relevant data about a task, including its status, progress,
+/// logs, and optional performance metrics.
 #[derive(Debug, Clone)]
 pub struct Task {
     id: String,
@@ -32,6 +35,9 @@ pub struct Task {
     last_update: Instant,
 }
 
+/// Represents a single log entry for a task.
+///
+/// Logs include a timestamp, log level, and message to track task activity over time.
 #[derive(Debug, Clone)]
 pub struct TaskLog {
     timestamp: Instant,
@@ -39,6 +45,10 @@ pub struct TaskLog {
     message: String,
 }
 
+/// Holds performance metrics for a task.
+///
+/// Metrics include CPU usage, memory usage, and disk I/O, providing insight into
+/// resource consumption.
 #[derive(Debug, Clone)]
 pub struct TaskMetrics {
     cpu_usage: f64,
@@ -46,12 +56,19 @@ pub struct TaskMetrics {
     disk_io: f64,
 }
 
+/// Defines events that the application can handle.
+///
+/// This enum encapsulates user input, task updates from the gRPC stream, and periodic ticks
+/// for UI refresh.
 pub enum AppEvent {
     Input(KeyEvent),
     TaskEvent(task_monitor::taskmonitor::TaskEvent),
     Tick,
 }
 
+/// Main application state and logic.
+///
+/// Manages a collection of tasks, log messages, and UI state such as scrolling and exit conditions.
 pub struct App {
     exit: bool,
     tasks: HashMap<String, Task>,
@@ -60,6 +77,7 @@ pub struct App {
 }
 
 impl Default for App {
+    /// Creates a new `App` instance with default values.
     fn default() -> Self {
         Self {
             exit: false,
@@ -71,41 +89,45 @@ impl Default for App {
 }
 
 impl App {
+    /// Runs the application, setting up the terminal and event loop.
+    ///
+    /// This method initializes the terminal in raw mode, sets up event channels for input,
+    /// periodic ticks, and gRPC task events, and runs the main event loop until exit.
     pub async fn run(&mut self) -> io::Result<()> {
-        // Enable raw mode
+        // Enable raw mode for direct terminal input handling
         enable_raw_mode()?;
 
-        // Setup terminal
+        // Initialize the terminal with the Crossterm backend
         let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
 
-        // Setup channels for events
+        // Create a channel for sending and receiving application events
         let (tx, mut rx) = mpsc::channel(100);
         let tx_input = tx.clone();
         let tx_task = tx.clone();
 
-        // Input handling thread
+        // Spawn a task to handle user input asynchronously
         task::spawn(async move {
             loop {
                 if let Ok(crossterm::event::Event::Key(key_event)) = crossterm::event::read() {
                     if tx_input.send(AppEvent::Input(key_event)).await.is_err() {
-                        break;
+                        break; // Channel closed, exit the loop
                     }
                 }
             }
         });
 
-        // Periodic tick for UI updates
+        // Spawn a task for periodic UI updates (tick every 200ms)
         let tx_tick = tx.clone();
         task::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 if tx_tick.send(AppEvent::Tick).await.is_err() {
-                    break;
+                    break; // Channel closed, exit the loop
                 }
             }
         });
 
-        // gRPC task events stream
+        // Spawn a task to handle gRPC task event streaming
         task::spawn(async move {
             let mut client = TaskMonitorServiceClient::connect("http://[::1]:50051")
                 .await
@@ -122,12 +144,12 @@ impl App {
 
             while let Ok(Some(event)) = stream.message().await {
                 if tx_task.send(AppEvent::TaskEvent(event)).await.is_err() {
-                    break;
+                    break; // Channel closed, exit the loop
                 }
             }
         });
 
-        // Main event loop
+        // Main event loop: process events and update UI until exit
         while !self.exit {
             if let Some(event) = rx.recv().await {
                 match event {
@@ -140,11 +162,15 @@ impl App {
             }
         }
 
-        // Restore terminal
+        // Restore terminal to normal mode before exiting
         disable_raw_mode()?;
         Ok(())
     }
 
+    /// Handles keyboard input events.
+    ///
+    /// Supports quitting the app with 'q', scrolling up with the Up arrow, and scrolling
+    /// down with the Down arrow.
     fn handle_key_event(&mut self, key_event: KeyEvent) -> io::Result<()> {
         if key_event.kind == KeyEventKind::Press {
             match key_event.code {
@@ -157,15 +183,18 @@ impl App {
         Ok(())
     }
 
+    /// Processes task events received from the gRPC stream.
+    ///
+    /// Updates task state based on initialization, updates, logs, metrics, or termination events,
+    /// and logs relevant messages.
     fn handle_task_event(&mut self, event: task_monitor::taskmonitor::TaskEvent) {
-        // Separate tracking of message to avoid multiple mutable borrows
         let mut log_message = None;
 
         match event.event {
             Some(Event::Init(init)) => {
                 let task = Task {
                     id: init.task_id.clone(),
-                    name: init.name.clone(), // Clone to avoid move
+                    name: init.name.clone(),
                     status: TaskStatus::Waiting,
                     progress: 0.0,
                     logs: Vec::new(),
@@ -196,7 +225,7 @@ impl App {
                         message: log.message.clone(),
                     });
                     if task.logs.len() > 10 {
-                        task.logs.remove(0);
+                        task.logs.remove(0); // Keep only the latest 10 logs
                     }
                     log_message = Some(format!(
                         "Task {} log: {:?} - {}",
@@ -231,12 +260,14 @@ impl App {
             None => {}
         }
 
-        // Log message after the match to avoid multiple mutable borrows
         if let Some(msg) = log_message {
             self.log_message(msg);
         }
     }
 
+    /// Adds a message to the application's message log.
+    ///
+    /// Limits the message history to 50 entries, removing the oldest when the limit is exceeded.
     fn log_message(&mut self, message: String) {
         self.messages.push(message);
         if self.messages.len() > 50 {
@@ -244,17 +275,20 @@ impl App {
         }
     }
 
+    /// Renders the terminal UI using Ratatui.
+    ///
+    /// Displays a header, a task list with status and metrics, and a scrollable message log.
     fn ui(&self, frame: &mut Frame) {
         let layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),  // Header
-                Constraint::Min(10),    // Tasks
-                Constraint::Length(10), // Messages
+                Constraint::Length(3),  // Header section
+                Constraint::Min(10),    // Tasks section (minimum height)
+                Constraint::Length(10), // Messages section
             ])
             .split(frame.size());
 
-        // Header
+        // Render header with title and instructions
         let header = Paragraph::new(Line::from(vec![
             Span::styled("Task Monitor", Style::default().fg(Color::Blue)),
             Span::raw(" | "),
@@ -263,9 +297,8 @@ impl App {
         .block(Block::default().borders(Borders::BOTTOM));
         frame.render_widget(header, layout[0]);
 
-        // Tasks view
+        // Render tasks list
         let tasks_block = Block::default().title("Tasks").borders(Borders::ALL);
-
         let tasks_list: Vec<ListItem> = self
             .tasks
             .values()
@@ -295,7 +328,6 @@ impl App {
                     ]),
                 ];
 
-                // Add metrics if available
                 if let Some(metrics) = &task.metrics {
                     lines.push(Line::from(vec![Span::styled(
                         format!(
@@ -311,29 +343,29 @@ impl App {
             .collect();
 
         let tasks_list_widget = List::new(tasks_list).block(tasks_block);
-
         frame.render_widget(tasks_list_widget, layout[1]);
 
-        // Messages view
+        // Render messages log with scrolling
         let messages_block = Block::default().title("Messages").borders(Borders::ALL);
-
         let messages_text: Vec<Line> = self
             .messages
             .iter()
             .rev()
             .skip(self.scroll_offset)
-            .take(10)
+            .take(10) // Show up to 10 messages at a time
             .map(|msg| Line::from(Span::raw(msg.clone())))
             .collect();
 
         let messages_paragraph = Paragraph::new(messages_text)
             .block(messages_block)
             .wrap(Wrap { trim: false });
-
         frame.render_widget(messages_paragraph, layout[2]);
     }
 }
 
+/// Application entry point.
+///
+/// Initializes and runs the `App` instance using Tokio's async runtime.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::default();
